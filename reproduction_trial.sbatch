@@ -8,6 +8,7 @@
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:2
 #SBATCH --account=eduard
+#SBATCH --qos=normal
 #SBATCH --time=04:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
@@ -31,6 +32,9 @@ export PYTHONUNBUFFERED=1
 export HF_HOME="${HF_HOME:-/shared/models/huggingface}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HUB_CACHE}"
+# Dataset preparation needs a writable cache separate from the shared model cache.
+export HF_DATASETS_CACHE="$REPO_DIR/.cache/huggingface/datasets"
+mkdir -p "$HF_DATASETS_CACHE"
 export WANDB_MODE="${WANDB_MODE:-offline}"
 mkdir -p "$(dirname "$RUN_DIR")"
 mkdir "$RUN_DIR"

@@ -436,8 +436,9 @@ def main(args):
         lr_scheduler_type="cosine",
         save_strategy="steps",
         eval_strategy="steps",
-        save_steps=50,            
-        eval_steps=25,      
+        # Save every evaluated step so the best metric has a matching checkpoint.
+        save_steps=25,
+        eval_steps=25,
         logging_steps=1,
         bf16=True,
         report_to="wandb",

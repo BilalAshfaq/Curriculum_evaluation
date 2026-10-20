@@ -1,0 +1,12 @@
+# Local caches and Python bytecode
+/.cache/
+__pycache__/
+*.py[cod]
+
+# Generated training results and scheduler logs
+/results/
+/slurm-logs/*
+!/slurm-logs/.gitkeep
+
+# Local Conda metadata backups
+/curr-eval-conda-meta-backup-*/

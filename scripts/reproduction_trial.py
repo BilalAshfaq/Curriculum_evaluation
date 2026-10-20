@@ -19,7 +19,7 @@ def main():
     parser.add_argument("--max_steps", type=int, default=50)
     args = parser.parse_args()
     if args.max_steps < 50:
-        parser.error("Use at least 50 steps to exercise the original save interval")
+        parser.error("Use at least 50 steps to exercise two evaluation/save intervals")
 
     source = Path(__file__).resolve().parents[1] / "train_base/train_llama3_8b_lora.py"
     spec = importlib.util.spec_from_file_location("original_llama_training", source)
