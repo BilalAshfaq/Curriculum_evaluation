@@ -35,8 +35,11 @@ VALID_NUM="${VALID_NUM:-500}"
 MAX_LENGTH="${MAX_LENGTH:-512}"
 
 cd "$REPO_DIR"
+# Conda compiler hooks may read unset variables while switching environments.
+set +u
 source "$CONDA_SH"
 conda activate "$CONDA_ENV"
+set -u
 
 export PYTHONUNBUFFERED=1
 export HF_HOME="${HF_HOME:-/shared/models/huggingface}"

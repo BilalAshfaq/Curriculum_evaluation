@@ -22,8 +22,11 @@ MODEL_NAME="${MODEL_NAME:-meta-llama/Meta-Llama-3.1-8B}"
 MODEL_REVISION="${MODEL_REVISION:-main}"
 RUN_DIR="${RUN_DIR:-$REPO_DIR/results/reproduction/trial-${SLURM_JOB_ID}}"
 cd "$REPO_DIR"
+# Conda compiler hooks may read unset variables while switching environments.
+set +u
 source "$CONDA_SH"
 conda activate "$CONDA_ENV"
+set -u
 export PYTHONUNBUFFERED=1
 export HF_HOME="${HF_HOME:-/shared/models/huggingface}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
