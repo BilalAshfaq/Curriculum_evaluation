@@ -1,0 +1,2 @@
+# Slurm scripts require Unix line endings on the cluster.
+*.sbatch text eol=lf
