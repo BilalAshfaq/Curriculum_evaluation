@@ -7,6 +7,7 @@ override here is max_steps; evaluation/save intervals and scheduler stay intact.
 import argparse
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 
@@ -47,9 +48,28 @@ def main():
                 while scheduler is not None and id(scheduler) not in seen:
                     seen.add(id(scheduler))
                     chain.append(f"{type(scheduler).__module__}.{type(scheduler).__name__}")
-                    scheduler = getattr(scheduler, "lr_scheduler", None)
+                    inner = getattr(scheduler, "scheduler", None)
+                    scheduler = inner if inner is not None else getattr(scheduler, "lr_scheduler", None)
                 self.report["scheduler_classes"] = chain
+                self.report["requested_scheduler"] = training_args.lr_scheduler_type.value
+                self.report["warmup_steps"] = training_args.get_warmup_steps(state.max_steps)
+                self.report["learning_rate_trace"] = []
                 print("TRIAL scheduler classes:", chain, flush=True)
+
+        def on_step_end(self, training_args, state, control, **kwargs):
+            if state.is_world_process_zero:
+                actual = float(kwargs["lr_scheduler"].get_last_lr()[0])
+                warmup = training_args.get_warmup_steps(state.max_steps)
+                if state.global_step < warmup:
+                    factor = state.global_step / max(1, warmup)
+                else:
+                    progress = (state.global_step - warmup) / max(1, state.max_steps - warmup)
+                    factor = max(0.0, 0.5 * (1 + math.cos(math.pi * progress)))
+                expected = training_args.learning_rate * factor
+                self.report["learning_rate_trace"].append({
+                    "step": state.global_step, "actual": actual, "expected_cosine": expected,
+                    "matches": math.isclose(actual, expected, rel_tol=1e-4, abs_tol=1e-9),
+                })
 
     original_trainer = module.SequentialTrainer
 
@@ -90,6 +110,10 @@ def main():
                     "load_best_model_at_end": self.args.load_best_model_at_end,
                     "log_history": self.state.log_history,
                 })
+                trace = self.trial_report.get("learning_rate_trace", [])
+                self.trial_report["cosine_schedule_verified"] = (
+                    len(trace) == self.state.global_step and all(row["matches"] for row in trace)
+                )
                 output = Path(args.output_dir)
                 output.mkdir(parents=True, exist_ok=True)
                 (output / "trial_report.json").write_text(
@@ -99,6 +123,8 @@ def main():
                     raise RuntimeError("No best checkpoint was recorded during the trial")
                 if not any("eval_loss" in row for row in self.state.log_history):
                     raise RuntimeError("No validation loss was recorded during the trial")
+                if not self.trial_report["cosine_schedule_verified"]:
+                    raise RuntimeError("Actual learning rates do not match cosine with 10% warmup; inspect trial_report.json")
             return result
 
     module.SequentialTrainer = TrialTrainer

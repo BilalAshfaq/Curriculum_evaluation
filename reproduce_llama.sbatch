@@ -64,8 +64,8 @@ echo "Run directory: $RUN_DIR"
 echo "Started: $(date --iso-8601=seconds)"
 echo "Conda environment: $CONDA_ENV"
 echo "Effective batch size: $((2 * BATCH_SIZE * GRAD_ACCUMULATION))"
-echo "Scheduler: retaining the original DeepSpeed WarmupLR configuration."
-echo "The Trainer requests cosine; verify the active scheduler in the run logs."
+echo "Scheduler: Trainer cosine decay with 10% warmup (paper Table 6)."
+echo "DeepSpeed scheduler override removed; verify the corrected trial before full training."
 
 python - <<'PY'
 import torch
@@ -105,7 +105,8 @@ DATASET_PATH="$(realpath "$DATASET_PATH")"
 sha256sum "$DATASET_PATH" > "$RUN_DIR/dataset.sha256"
 
 # Copy the launch configuration and DeepSpeed JSON for this job. Only the machine
-# path and process count change; the original optimization configuration is retained.
+# path and process count change here. The source JSON now delegates scheduling
+# to the Trainer so cosine decay and 10% warmup match the paper.
 python - "$REPO_DIR" "$RUN_DIR" <<'PY'
 import pathlib
 import shutil

@@ -125,6 +125,12 @@ print("Resolved model:", json.dumps(metadata), flush=True)
 PY
 
 MODEL_PATH="$(cat "$RUN_DIR/model_path.txt")"
+# Check all 20K examples using the unchanged training tokenizer implementation.
+python "$REPO_DIR/scripts/audit_sequence_lengths.py" \
+    --model_name "$MODEL_PATH" \
+    --dataset_path "$REPO_DIR/dataset/MetaMathQA-20K_train.jsonl" \
+    --output_dir "$RUN_DIR/sequence-audit" \
+    2>&1 | tee "$RUN_DIR/sequence-audit.log"
 sha256sum "$RUN_DIR/trial_data.jsonl" > "$RUN_DIR/dataset.sha256"
 TRAIN_COMMAND=(accelerate launch --config_file "$RUN_DIR/accelerate.yaml"
     "$REPO_DIR/scripts/reproduction_trial.py"
