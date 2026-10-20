@@ -3,13 +3,14 @@
 #   mkdir -p slurm-logs
 #   sbatch reproduce_llama.sbatch
 # Optional overrides, for example:
-#   sbatch --export=ALL,GRAD_ACCUMULATION=4 reproduce_llama.sbatch
+#   sbatch --gres=gpu:2 --export=ALL,NUM_GPUS=2 reproduce_llama.sbatch
 # To use an existing ordered dataset, export DATASET_PATH before submission.
 #SBATCH --job-name=curriculum-llama-repro
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=shard:10
 #SBATCH --account=eduard
+#SBATCH --qos=normal
 #SBATCH --time=3-00:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
@@ -29,7 +30,9 @@ RUN_DIR="${RUN_DIR:-$REPO_DIR/results/reproduction/$RUN_NAME}"
 EPOCHS="${EPOCHS:-3}"
 LEARNING_RATE="${LEARNING_RATE:-5e-5}"
 BATCH_SIZE="${BATCH_SIZE:-4}"
-GRAD_ACCUMULATION="${GRAD_ACCUMULATION:-4}"
+export NUM_GPUS="${NUM_GPUS:-1}"
+case "$NUM_GPUS" in 1|2) ;; *) echo "NUM_GPUS must be 1 or 2"; exit 1 ;; esac
+GRAD_ACCUMULATION="${GRAD_ACCUMULATION:-$((8 / NUM_GPUS))}"
 VALID_NUM="${VALID_NUM:-500}"
 # Retain the training script's sequence-length default pending confirmation.
 MAX_LENGTH="${MAX_LENGTH:-512}"
@@ -63,18 +66,20 @@ echo "Repository: $REPO_DIR"
 echo "Run directory: $RUN_DIR"
 echo "Started: $(date --iso-8601=seconds)"
 echo "Conda environment: $CONDA_ENV"
-echo "Effective batch size: $((2 * BATCH_SIZE * GRAD_ACCUMULATION))"
+echo "Effective batch size: $((NUM_GPUS * BATCH_SIZE * GRAD_ACCUMULATION))"
 echo "Scheduler: Trainer cosine decay with 10% warmup (paper Table 6)."
 echo "DeepSpeed scheduler override removed; verify the corrected trial before full training."
 
 python - <<'PY'
+import os
 import torch
+num_gpus = int(os.environ["NUM_GPUS"])
 print("PyTorch:", torch.__version__)
 print("CUDA runtime:", torch.version.cuda)
 print("CUDA devices:", torch.cuda.device_count())
-if not torch.cuda.is_available() or torch.cuda.device_count() != 2:
-    raise RuntimeError("This job requires exactly two allocated CUDA GPUs")
-for index in range(2):
+if not torch.cuda.is_available() or torch.cuda.device_count() != num_gpus:
+    raise RuntimeError(f"This job requires exactly {num_gpus} visible CUDA GPU(s)")
+for index in range(num_gpus):
     with torch.cuda.device(index):
         print(index, torch.cuda.get_device_name(index),
               "memory GiB:", torch.cuda.get_device_properties(index).total_memory / 2**30,
@@ -108,6 +113,7 @@ sha256sum "$DATASET_PATH" > "$RUN_DIR/dataset.sha256"
 # path and process count change here. The source JSON now delegates scheduling
 # to the Trainer so cosine decay and 10% warmup match the paper.
 python - "$REPO_DIR" "$RUN_DIR" <<'PY'
+import os
 import pathlib
 import shutil
 import sys
@@ -118,7 +124,7 @@ source = repo / "train_base" / "accelerate_config"
 config = yaml.safe_load((source / "train_config.yaml").read_text())
 shutil.copyfile(source / "ds_config.json", run / "ds_config.json")
 config["deepspeed_config"]["deepspeed_config_file"] = str(run / "ds_config.json")
-config["num_processes"] = 2
+config["num_processes"] = int(os.environ["NUM_GPUS"])
 (run / "accelerate.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
 PY
 

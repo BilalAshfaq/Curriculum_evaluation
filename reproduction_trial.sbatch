@@ -6,7 +6,7 @@
 #SBATCH --job-name=curriculum-trial
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=shard:10
 #SBATCH --account=eduard
 #SBATCH --qos=normal
 #SBATCH --time=04:00:00
@@ -22,6 +22,9 @@ CONDA_ENV="${CONDA_ENV:-curr-eval-env}"
 MODEL_NAME="${MODEL_NAME:-meta-llama/Meta-Llama-3.1-8B}"
 MODEL_REVISION="${MODEL_REVISION:-main}"
 RUN_DIR="${RUN_DIR:-$REPO_DIR/results/reproduction/trial-${SLURM_JOB_ID}}"
+export NUM_GPUS="${NUM_GPUS:-1}"
+case "$NUM_GPUS" in 1|2) ;; *) echo "NUM_GPUS must be 1 or 2"; exit 1 ;; esac
+GRAD_ACCUMULATION="${GRAD_ACCUMULATION:-$((8 / NUM_GPUS))}"
 cd "$REPO_DIR"
 # Conda compiler hooks may read unset variables while switching environments.
 set +u
@@ -50,13 +53,16 @@ cp "$REPO_DIR/reproduction_trial.sbatch" "$RUN_DIR/submitted-script.sbatch"
 cp "$REPO_DIR/scripts/reproduction_trial.py" "$RUN_DIR/trial-runner.py"
 
 # Check actual CUDA operations and imports before fetching model weights.
+echo "Effective batch size: $((NUM_GPUS * 4 * GRAD_ACCUMULATION))"
 python - <<'PY'
 import importlib
+import os
 import torch
+num_gpus = int(os.environ["NUM_GPUS"])
 print("PyTorch:", torch.__version__, "CUDA:", torch.version.cuda)
-if not torch.cuda.is_available() or torch.cuda.device_count() != 2:
-    raise RuntimeError("Exactly two allocated CUDA GPUs are required")
-for i in range(2):
+if not torch.cuda.is_available() or torch.cuda.device_count() != num_gpus:
+    raise RuntimeError(f"Exactly {num_gpus} visible CUDA GPU(s) required")
+for i in range(num_gpus):
     with torch.cuda.device(i):
         print("GPU", i, torch.cuda.get_device_name(i),
               "GiB:", torch.cuda.get_device_properties(i).total_memory / 2**30)
@@ -72,6 +78,7 @@ PY
 python - "$REPO_DIR" "$RUN_DIR" "$MODEL_NAME" "$MODEL_REVISION" <<'PY'
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -119,7 +126,7 @@ launch_source = repo / "train_base/accelerate_config"
 launch = yaml.safe_load((launch_source / "train_config.yaml").read_text())
 shutil.copyfile(launch_source / "ds_config.json", run / "ds_config.json")
 launch["deepspeed_config"]["deepspeed_config_file"] = str(run / "ds_config.json")
-launch["num_processes"] = 2
+launch["num_processes"] = int(os.environ["NUM_GPUS"])
 (run / "accelerate.yaml").write_text(yaml.safe_dump(launch, sort_keys=False))
 print("Resolved model:", json.dumps(metadata), flush=True)
 PY
@@ -135,7 +142,8 @@ sha256sum "$RUN_DIR/trial_data.jsonl" > "$RUN_DIR/dataset.sha256"
 TRAIN_COMMAND=(accelerate launch --config_file "$RUN_DIR/accelerate.yaml"
     "$REPO_DIR/scripts/reproduction_trial.py"
     --model_name "$MODEL_PATH" --dataset_path "$RUN_DIR/trial_data.jsonl"
-    --output_dir "$RUN_DIR/adapter" --max_steps 50)
+    --output_dir "$RUN_DIR/adapter" --max_steps 50
+    --grad_accumulation "$GRAD_ACCUMULATION")
 printf '%q ' "${TRAIN_COMMAND[@]}" > "$RUN_DIR/train-command.sh"
 printf '\n' >> "$RUN_DIR/train-command.sh"
 "${TRAIN_COMMAND[@]}" 2>&1 | tee "$RUN_DIR/train.log"
@@ -143,7 +151,7 @@ printf '\n' >> "$RUN_DIR/train-command.sh"
 [[ -f "$RUN_DIR/adapter/adapter_config.json" ]] || { echo "Missing saved adapter"; exit 1; }
 [[ -f "$RUN_DIR/adapter/trial_report.json" ]] || { echo "Missing trial report"; exit 1; }
 
-# One evaluation process can use both allocated GPUs via the original device_map.
+# One evaluation process uses the allocated GPU(s) via the original device_map.
 # Running from RUN_DIR keeps the original evaluator's relative output paths here.
 cd "$RUN_DIR"
 for benchmark in MetaMathQA ASDiv gsm8k mathbench math; do

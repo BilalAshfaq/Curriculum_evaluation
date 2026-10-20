@@ -18,7 +18,10 @@ def main():
     parser.add_argument("--dataset_path", required=True)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--max_steps", type=int, default=50)
+    parser.add_argument("--grad_accumulation", type=int, default=8)
     args = parser.parse_args()
+    if args.grad_accumulation < 1:
+        parser.error("--grad_accumulation must be positive")
     if args.max_steps < 50:
         parser.error("Use at least 50 steps to exercise two evaluation/save intervals")
 
@@ -133,7 +136,7 @@ def main():
     settings = argparse.Namespace(
         model_name=args.model_name, dataset_path=args.dataset_path,
         output_dir=args.output_dir, seed=42, epochs=3, batch_size=4,
-        grad_accumulation=4, learning_rate=5e-5, valid_num=16,
+        grad_accumulation=args.grad_accumulation, learning_rate=5e-5, valid_num=16,
         max_length=512, lora_r=64, lora_alpha=128, lora_dropout=0.05,
         gradient_checkpointing=True, wandb_project="curriculum-reproduction-trial",
         wandb_run_name=f"trial-{os.environ.get('SLURM_JOB_ID', 'local')}",
