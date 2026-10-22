@@ -10,7 +10,6 @@
 #SBATCH --ntasks=1
 #SBATCH --gres=shard:10
 #SBATCH --account=eduard
-#SBATCH --qos=normal
 #SBATCH --time=3-00:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
